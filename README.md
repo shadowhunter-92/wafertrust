@@ -1,11 +1,13 @@
-# fab-governance-demo
+# WaferTrust
 
-A working prototype of a **neutral trust layer for AI agents that act on semiconductor
-fab equipment**, built on [AgentBridge](https://github.com/shadowhunter-92/agentbridge).
+**The trust layer for every wafer.** A neutral governance layer for AI agents that act on
+semiconductor fab equipment — a read-only "flight recorder," approval-gated writes,
+wafer-dollar risk budgets, and a hash-chained, signed audit. Built on
+[AgentBridge](https://github.com/shadowhunter-92/agentbridge).
 
-It demonstrates the wedge: start with a **read-only "flight recorder"** for the
-maintenance / facilities / analytics agents fabs run today, then add **approval-gated
-writes** bounded by **wafer-dollar risk budgets**, with a **hash-chained, signed audit**.
+This repo is a working prototype demonstrating the wedge: start with a **read-only flight
+recorder** for the maintenance / facilities / analytics agents fabs run today, then add
+**approval-gated writes** bounded by **wafer-dollar risk budgets**.
 
 ## What it shows
 
