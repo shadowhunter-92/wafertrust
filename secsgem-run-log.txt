@@ -1,0 +1,57 @@
+
+========================================================================
+SCENE 1 — UNGOVERNED: an agent changes a setpoint directly
+========================================================================
+  Agent calls set_equipment_constant(2001, 500) with NO identity,
+  NO approval, NO budget, NO audit. The equipment's own E191 report
+  says agentAudit = 'none'.
+  Result: {'ok': False, 'scrappedWafers': 25, 'damageUsd': 500000, 'reason': '500.0 outside [200,450]'}
+  >> 25 wafers scrapped, $500,000 lost,
+     and NO tamper-evident record of who did it or why.
+
+========================================================================
+SCENE 2 — GOVERNED: read-only flight recorder (pass-through + audit)
+========================================================================
+  Agent identity registered: fab-maintenance-agent (Ed25519 DID)
+  Wafer-dollar budget: $600,000/shift; approval above $100k risk; per-call cap $750k
+  [read] ALLOWED  cost=$0  -> {'communicationState': 'COMMUNICATING', 'controlState': 'ONLINE', 'transportState': 'READY'}
+  [read] ALLOWED  cost=$0  -> {'alarms': []}
+
+========================================================================
+SCENE 3 — GOVERNED: a write is BLOCKED pending human approval
+========================================================================
+  [write] BLOCKED  approval required for 'set_equipment_constant'
+           pending human approval: a81bce0c9e5948e58f9f5c19c8e76412
+
+========================================================================
+SCENE 4 — Human approves; the write executes within budget
+========================================================================
+  Operator approves a81bce0c9e5948e58f9f5c19c8e76412: True
+  [write] ALLOWED  cost=$500,000  -> {'ok': True, 'ecid': 2001, 'value': 400.0}
+  Budget spent $500,000 / $600,000; remaining $100,000
+
+========================================================================
+SCENE 5 — Wafer-dollar circuit breaker: budget exhausted
+========================================================================
+  [write] BLOCKED  approval required for 'execute_command'
+           pending human approval: 5e1eca4fd57149bfa3d1dda3d4dd77b9
+  [write] BLOCKED  spend cap exceeded (500000.0+0+500000.0 > 600000)
+  >> Even with approval, the action is denied: it would risk more
+     wafer-dollars than the shift budget allows.
+
+========================================================================
+SCENE 6 — The flight recorder: hash-chained, verifiable audit
+========================================================================
+  #0  allow get_equipment_status     ceae1f6a6225  authorized
+  #1  allow list_alarms              dec41a0af701  authorized
+  #2  deny  set_equipment_constant   b21c8dc41f49  approval required for 'set_equipment_constant'
+  #3  allow set_equipment_constant   507f9f2deb43  authorized
+  #4  deny  execute_command          75fea328bcd0  approval required for 'execute_command'
+  #5  deny  execute_command          ea53a07cd654  spend cap exceeded (500000.0+0+500000.0 > 600000)
+
+  Audit integrity verified: True
+  Exported 6 signed entries -> audit-flight-recorder.jsonl
+
+  Same equipment. Same agent. One trusts nothing; the other can prove
+  every action was identified, authorized, budgeted, approved, and logged.
+
