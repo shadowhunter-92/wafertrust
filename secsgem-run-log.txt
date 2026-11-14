@@ -13,6 +13,8 @@ SCENE 1 — UNGOVERNED: an agent changes a setpoint directly
 SCENE 2 — GOVERNED: read-only flight recorder (pass-through + audit)
 ========================================================================
   Agent identity registered: fab-maintenance-agent (Ed25519 DID)
+  Every call must carry a request-bound Ed25519 proof; the kernel
+  denies unsigned or forged calls fail-closed (production admission).
   Wafer-dollar budget: $600,000/shift; approval above $100k risk; per-call cap $750k
   [read] ALLOWED  cost=$0  -> {'communicationState': 'COMMUNICATING', 'controlState': 'ONLINE', 'transportState': 'READY'}
   [read] ALLOWED  cost=$0  -> {'alarms': []}
@@ -21,12 +23,12 @@ SCENE 2 — GOVERNED: read-only flight recorder (pass-through + audit)
 SCENE 3 — GOVERNED: a write is BLOCKED pending human approval
 ========================================================================
   [write] BLOCKED  approval required for 'set_equipment_constant'
-           pending human approval: a81bce0c9e5948e58f9f5c19c8e76412
+           pending human approval: 017110d66cf74c3abb4495fd69083e6d
 
 ========================================================================
 SCENE 4 — Human approves; the write executes within budget
 ========================================================================
-  Operator approves a81bce0c9e5948e58f9f5c19c8e76412: True
+  Operator approves 017110d66cf74c3abb4495fd69083e6d: True
   [write] ALLOWED  cost=$500,000  -> {'ok': True, 'ecid': 2001, 'value': 400.0}
   Budget spent $500,000 / $600,000; remaining $100,000
 
@@ -34,24 +36,36 @@ SCENE 4 — Human approves; the write executes within budget
 SCENE 5 — Wafer-dollar circuit breaker: budget exhausted
 ========================================================================
   [write] BLOCKED  approval required for 'execute_command'
-           pending human approval: 5e1eca4fd57149bfa3d1dda3d4dd77b9
+           pending human approval: e3cc5c5c256b46d397eef7529ccf534d
   [write] BLOCKED  spend cap exceeded (500000.0+0+500000.0 > 600000)
   >> Even with approval, the action is denied: it would risk more
      wafer-dollars than the shift budget allows.
 
 ========================================================================
-SCENE 6 — The flight recorder: hash-chained, verifiable audit
+SCENE 6 — IMPERSONATION: a forged call is denied fail-closed
 ========================================================================
-  #0  allow get_equipment_status     ceae1f6a6225  authorized
-  #1  allow list_alarms              dec41a0af701  authorized
-  #2  deny  set_equipment_constant   b21c8dc41f49  approval required for 'set_equipment_constant'
-  #3  allow set_equipment_constant   507f9f2deb43  authorized
-  #4  deny  execute_command          75fea328bcd0  approval required for 'execute_command'
-  #5  deny  execute_command          ea53a07cd654  spend cap exceeded (500000.0+0+500000.0 > 600000)
+  [forged] BLOCKED  request-bound signed agent proof required
+  >> The impostor signs with its own key, not the registered agent key.
+     No valid proof, no execution — and the denial itself is audited.
 
-  Audit integrity verified: True
-  Exported 6 signed entries -> audit-flight-recorder.jsonl
+========================================================================
+SCENE 7 — The flight recorder: complete, signed, independently verifiable
+========================================================================
+  #0  allow get_equipment_status     d6ee2c47739f  authorized
+  #1  allow list_alarms              c95d290aece5  authorized
+  #2  deny  set_equipment_constant   0c2f65a12aea  approval required for 'set_equipment_constant'
+  #3  allow set_equipment_constant   063368785b79  authorized
+  #4  deny  execute_command          3ec36d3c04f5  approval required for 'execute_command'
+  #5  deny  execute_command          21276ef74196  spend cap exceeded (500000.0+0+500000.0 > 600000)
+  #6  deny  execute_command          04a842caae73  request-bound signed agent proof required
+
+  Audit integrity verified (durable chain): True
+  Exported 7 full-field entries -> audit-flight-recorder.jsonl
+  Signed checkpoint (operator key) -> audit-checkpoint.json: verified True
+  Call journal (arguments + outcomes) -> audit-call-journal.jsonl
+  Independent re-verification from the exported file: True
+  Check it yourself: python verify_export.py audit
 
   Same equipment. Same agent. One trusts nothing; the other can prove
-  every action was identified, authorized, budgeted, approved, and logged.
+  every action was authenticated, authorized, budgeted, approved, and logged.
 

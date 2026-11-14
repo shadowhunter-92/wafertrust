@@ -4,6 +4,7 @@ SCENE 1 — The agent reads asset health (read-only flight recorder)
 ========================================================================
   This is the maintenance agent fabs run today (e.g. Intel facilities).
   Identity: fab-maintenance-agent (Ed25519 DID). Every read is audited.
+  Every call carries a request-bound Ed25519 proof; forged calls are denied.
   [read] ALLOWED  cost=$0  -> {'assetId': 'UPW-PUMP-01', 'vibration_mm_s': 4.8, 'trend': 'rising', 'health': 71}
   [read] ALLOWED  cost=$0  -> {'assetId': 'UPW-PUMP-01', 'health': 71, 'vibration_mm_s': 4.8, 'trend': 'rising', 'status': 'RUNNING'}
 
@@ -18,27 +19,39 @@ SCENE 2 — The agent RECOMMENDS a work order (audited, no actuation)
 SCENE 3 — DISPATCH is BLOCKED: it takes a tool offline (wafer-risk)
 ========================================================================
   [dispatch] BLOCKED  approval required for 'dispatch_work_order'
-           pending human approval: 0f9d1d47ce8042c8bfa1bfccc5a3e6d9
+           pending human approval: 9c91bae2dcd24611bb7af2ed38661e7b
 
 ========================================================================
 SCENE 4 — Human approves; dispatch executes within the wafer budget
 ========================================================================
-  Operator approves 0f9d1d47ce8042c8bfa1bfccc5a3e6d9: True
+  Operator approves 9c91bae2dcd24611bb7af2ed38661e7b: True
   [dispatch] ALLOWED  cost=$200,000  -> {'ok': True, 'workOrderId': 'WO-001', 'assetId': 'UPW-PUMP-01', 'toolOffline': True, 'waferRiskUsd': 200000}
   Wafer-budget spent $200,000 / $300,000; remaining $100,000
 
 ========================================================================
-SCENE 5 — The flight recorder: every recommendation + action, verifiable
+SCENE 5 — IMPERSONATION: a forged dispatch is denied fail-closed
 ========================================================================
-  #0  allow read_sensor_trends       9e2047ccbdbf  authorized
-  #1  allow get_asset_health         dbc952f00f16  authorized
-  #2  allow recommend_work_order     9825f006eca3  authorized
-  #3  deny  dispatch_work_order      2c84b2db8da0  approval required for 'dispatch_work_order'
-  #4  allow dispatch_work_order      7e993edfe3c1  authorized
+  [forged] BLOCKED  request-bound signed agent proof required
+  >> No valid proof, no dispatch — and the denial itself is audited.
 
-  Audit integrity verified: True
-  Exported 5 signed entries -> maintenance-flight-recorder.jsonl
+========================================================================
+SCENE 6 — The flight recorder: every recommendation + action, verifiable
+========================================================================
+  #0  allow read_sensor_trends       88565addbb48  authorized
+  #1  allow get_asset_health         1a424dc67d22  authorized
+  #2  allow recommend_work_order     a30b160a97cd  authorized
+  #3  deny  dispatch_work_order      5ca1818fac5b  approval required for 'dispatch_work_order'
+  #4  allow dispatch_work_order      57c52c754886  authorized
+  #5  deny  dispatch_work_order      eec40af7e23e  request-bound signed agent proof required
+
+  Audit integrity verified (durable chain): True
+  Exported 6 full-field entries -> maintenance-flight-recorder.jsonl
+  Signed checkpoint (operator key) -> maintenance-checkpoint.json: verified True
+  Call journal (arguments + outcomes) -> maintenance-call-journal.jsonl
+  Independent re-verification from the exported file: True
+  Check it yourself: python verify_export.py maintenance
 
   The agent recommends freely; humans approve action; every step is
-  attributable. That is the trust layer the fab industry says it needs.
+  authenticated and attributable. That is the trust layer the fab industry
+  says it needs.
 
