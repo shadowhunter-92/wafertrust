@@ -12,11 +12,13 @@ import os
 import tempfile
 import unittest
 from dataclasses import asdict
+from unittest import mock
 
 from keystore import Keystore, KeystoreError
 from src.governance import AgentIdentity, AuditLog
 from src.governance.store import InMemoryStore
 import anchor
+import tsa
 
 
 def run(coro):
@@ -95,6 +97,26 @@ class AnchorCase(unittest.TestCase):
     def test_did_key_parse(self):
         wit = AgentIdentity.generate("wit")
         self.assertEqual(anchor.witness_key_from_did(wit.did), wit.public_key_hex)
+
+
+class TsaCase(unittest.TestCase):
+    def test_timestamp_and_verify_success(self):
+        fake = mock.Mock()
+        fake.timestamp.return_value = b"TOKEN"
+        fake.check.return_value = True
+        with mock.patch.object(tsa, "RemoteTimestamper", return_value=fake):
+            c = tsa.TsaClient("https://freetsa.org/tsr", b"CERT")
+            tok = c.timestamp(b"digest")
+            self.assertEqual(tok, b"TOKEN")
+            self.assertTrue(c.verify(tok, b"digest"))
+
+    def test_network_failure_raises_tsaerror(self):
+        fake = mock.Mock()
+        fake.timestamp.side_effect = OSError("network down")
+        with mock.patch.object(tsa, "RemoteTimestamper", return_value=fake):
+            c = tsa.TsaClient("https://freetsa.org/tsr", b"CERT")
+            with self.assertRaises(tsa.TsaError):
+                c.timestamp(b"digest")
 
 
 if __name__ == "__main__":

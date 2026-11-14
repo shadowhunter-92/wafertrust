@@ -19,3 +19,7 @@ prometheus-client==0.26.0
 pydantic==2.14.3
 PyJWT==2.15.1
 uvicorn==0.54.0
+
+# Optional: RFC 3161 TSA time anchoring (tsa.py). Tests/CI mock the client, so no
+# network is needed; the pinned FreeTSA cert (tsa/freetsa.pem) is only for live use.
+rfc3161ng==2.1.3
