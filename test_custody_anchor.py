@@ -6,11 +6,32 @@ Run with the PUBLIC AgentBridge kernel cloned as the sibling ../agentbridge:
 
 from __future__ import annotations
 
+import asyncio
+import json
 import os
 import tempfile
 import unittest
+from dataclasses import asdict
 
 from keystore import Keystore, KeystoreError
+from src.governance import AgentIdentity, AuditLog
+from src.governance.store import InMemoryStore
+import anchor
+
+
+def run(coro):
+    return asyncio.run(coro)
+
+
+def _chain_with_checkpoint():
+    audit = AuditLog(InMemoryStore())
+    audit.record(actor="a", action="route_call", source_protocol="mcp",
+                 target_protocol="mcp", capability="get_equipment_status",
+                 decision="allow", reason="authorized", cost=0)
+    op = AgentIdentity.generate("op")
+    cp = audit.checkpoint(op.sign, op.public_key_hex)
+    records = [asdict(e) for e in audit.entries()]
+    return audit, cp, op, records
 
 
 class KeystoreCase(unittest.TestCase):
@@ -49,6 +70,31 @@ class KeystoreCase(unittest.TestCase):
         ks.load_or_generate("a")
         ks.save()
         self.assertFalse(os.path.exists(self.path))
+
+
+class AnchorCase(unittest.TestCase):
+    def test_witness_verifies_and_requires_independent_key(self):
+        audit, cp, op, records = _chain_with_checkpoint()
+        wit = AgentIdentity.generate("wit")
+        w = anchor.create_witness(cp, wit, anchor_reference="local-witness-only")
+        res = anchor.verify_anchor(records, cp, w, operator_key_hex=op.public_key_hex,
+                                   witness_key_hex=wit.public_key_hex)
+        self.assertTrue(res["verified"])
+        with self.assertRaises(Exception):
+            anchor.verify_anchor(records, cp, w, operator_key_hex=op.public_key_hex,
+                                 witness_key_hex=op.public_key_hex)
+
+    def test_truncated_chain_fails(self):
+        audit, cp, op, records = _chain_with_checkpoint()
+        wit = AgentIdentity.generate("wit")
+        w = anchor.create_witness(cp, wit, anchor_reference="local-witness-only")
+        with self.assertRaises(Exception):
+            anchor.verify_anchor(records[:-1], cp, w, operator_key_hex=op.public_key_hex,
+                                 witness_key_hex=wit.public_key_hex)
+
+    def test_did_key_parse(self):
+        wit = AgentIdentity.generate("wit")
+        self.assertEqual(anchor.witness_key_from_did(wit.did), wit.public_key_hex)
 
 
 if __name__ == "__main__":
