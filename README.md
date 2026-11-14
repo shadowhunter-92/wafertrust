@@ -1,51 +1,54 @@
 # WaferTrust
 
-**The trust layer for every wafer.** A neutral governance layer for AI agents that act on
+**The trust layer for every wafer.** A neutral governance prototype for AI agents that act on
 semiconductor fab equipment — a read-only "flight recorder," approval-gated writes,
-wafer-dollar risk budgets, and a hash-chained, Ed25519-signed audit. Built on the
+illustrative wafer-dollar risk budgets, and a hash-chained audit. Built on the
 [AgentBridge](https://github.com/shadowhunter-92/agentbridge) trust kernel.
 
 ## The gap
 
-A fab tool can report its own cybersecurity posture, but it cannot tell you **what an AI
-agent just did to it**. SEMI E191 reports computing-device status (device ID, OS details) —
-it says nothing about agent actions. So today an agent can call `set_equipment_constant`,
-`execute_command`, or start a process job with no identity, no approval, no budget, and no
-audit. In our run, one out-of-range setpoint scrapped a 25-wafer lot (**~$500,000**) and the
-equipment's own E191-style report still said `agentAudit = 'none'`.
+A device-status report is not an agent-action audit trail. SEMI E191 reports
+computing-device status, rather than authorizing or recording AI-agent tool calls.
+In our simulator, one direct out-of-range setpoint change scraps a 25-wafer lot
+(**~$500,000**, assuming $20,000 per wafer). The simulated E191-style report includes
+an illustrative `agentAudit = 'none'` extension; this is not a real E191 field.
 
-WaferTrust fills that gap: a neutral layer between the agent and the SECS/GEM equipment
-boundary that makes every action **identified, authorized, budgeted, approved, and logged**.
+WaferTrust demonstrates a gateway between an agent and a simulated SECS/GEM equipment
+boundary: read calls are logged, and writes require approval and sufficient configured budget.
 
-## What's unique
+## What the prototype demonstrates
 
-- **Wafer-dollar risk budgets.** Each write carries a blast radius in wafer-dollars (a
-  setpoint change or `ABORT` risks a whole lot). A per-shift budget and a per-call cap deny
-  any action — *even an approved one* — that would risk more than the shift allows.
-- **A signed, hash-chained flight recorder.** Every call (reads included) is recorded with
-  an Ed25519 agent identity and chained so the log is tamper-evident and independently
-  verifiable (`verify_integrity() → True`). Replayable and attributable.
-- **Fab-specific, MCP-native.** SECS/GEM tool semantics (E30 GEM reads, equipment constants,
-  process jobs, carriers) governed at the MCP `tools/call` boundary — not a generic OT proxy.
-- **Real kernel, not a mock.** Governance is AgentBridge's actual `GovernanceGateway`
-  (Ed25519 identity, declarative policy, budgets, human approvals, hash-chained audit) with
-  fab semantics added on top.
+- **Wafer-dollar risk budgets.** Writes carry fixed, illustrative costs: $500,000 for a
+  setpoint change, command, or process-job action; $50,000 for a carrier action. A cumulative
+  budget and per-call cap apply even after approval. These are not live lot-value estimates,
+  and the example shift budget has no automatic shift reset.
+- **A hash-chained flight recorder.** The full in-process audit can be checked with
+  `verify_integrity()`. Entries are not individually signed, and the demo emits no signed
+  checkpoints. Hash-chain consistency alone does not prove independent custody, caller
+  authenticity, or the equipment's actual outcome.
+- **Fab-first, MCP-wire integration.** Reads, equipment constants, process jobs, and carriers
+  are routed through the MCP `tools/call` representation. This is a library demo, not a
+  standalone MCP server or a live SECS/GEM connection.
+- **Real kernel, not a mock.** Governance uses AgentBridge's actual `GovernanceGateway`
+  for policy, budgets, approvals, and audit. An Ed25519 identity is registered, but this
+  demo sets `require_verified=False` and does not supply caller signatures. Recorded
+  agent IDs therefore are not cryptographically authenticated caller attribution.
 
-Unlike general OT / OPC UA authorization gateways, WaferTrust is built for the fab: SECS/GEM
-semantics, wafer-dollar blast-radius budgets, and an audit trail aligned to the SEMI
-equipment-cybersecurity standards below.
+The focus is semiconductor workflows and wafer-dollar cost accounting, not a claim that
+SECS/GEM governance is otherwise absent. It governs tool access, not process physics:
+there is no live interlock, rate-of-change, or cross-tag safety-envelope model.
 
 ## What it shows
 
-Same equipment, same agent — two outcomes:
+Same simulated equipment, same demo agent — two outcomes:
 
-- **Ungoverned:** an agent calls `set_equipment_constant(2001, 500)` with no identity,
-  approval, budget, or audit. One out-of-range setpoint scraps a 25-wafer lot (**~$500,000**)
-  with no tamper-evident record of who did it or why.
-- **Governed:** reads pass through and are logged; writes are blocked pending human approval;
-  approved writes execute within a $600k/shift wafer-dollar budget; a circuit breaker denies
-  any action that would risk more than the shift allows. Every call is identified (Ed25519),
-  authorized, budgeted, approved, and recorded in a hash-chained audit (integrity verifies `True`).
+- **Ungoverned:** a direct `set_equipment_constant(2001, 500)` call scraps a simulated
+  25-wafer lot (**~$500,000**) without a gateway audit.
+- **Governed:** reads pass through and are logged; a setpoint write waits for human approval;
+  the approved write consumes $500,000 of a configured $600,000 budget; a subsequent
+  $500,000 `ABORT` is denied even after approval. The full in-process audit's hash-chain
+  integrity verifies `True`. This demonstrates approval and budget enforcement, not
+  detection of unsafe setpoints or a guarantee of preventing real wafer losses.
 
 ## How it maps to the SEMI equipment-cybersecurity standards
 
@@ -69,8 +72,14 @@ Same equipment, same agent — two outcomes:
 
 ## Artifacts (the proof)
 
-- `audit-flight-recorder.jsonl`, `maintenance-flight-recorder.jsonl` — hash-chained audit entries.
-- `secsgem-run-log.txt`, `maintenance-run-log.txt` — full console run logs.
+- `audit-flight-recorder.jsonl`, `maintenance-flight-recorder.jsonl` — summaries of audit
+  decisions containing entry hashes. They omit timestamp, source/target protocols, and
+  `prev_hash`, so they cannot independently reproduce or verify the full audit chain.
+- `secsgem-run-log.txt`, `maintenance-run-log.txt` — historical console run logs. Their
+  "signed entries" wording is inaccurate: this demo exports no audit-entry signatures.
+
+The full audit is held in memory and can verify its internal hash-chain consistency during
+execution. The summaries do not contain tool arguments/results and are not replay records.
 
 ## Run
 
@@ -83,9 +92,10 @@ PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python maintenance_demo.py
 ```
 
 `fab_gateway.py` adds `../agentbridge` to the path. The equipment/maintenance systems are
-laptop-only simulator stubs (no real fab hardware); in production the gateway's `invoke`
-would call the real secsgem-mcp-server → go-factory-io REST API, with the governance layer
-unchanged. **Engineering alpha — a prototype, not a production system.**
+laptop-only simulator stubs, with no real fab hardware. A real integration would need an
+actual equipment connector, authenticated caller and operator channels, durable complete
+audit exports, and deployment-specific risk policies. Those are not implemented here.
+**Engineering alpha — a prototype, not a production system.**
 
 ## Status & what I'm looking for
 
@@ -94,4 +104,7 @@ Independent, bootstrapped, validating whether this is worth building. I'm lookin
 maintainers of SECS/GEM and OPC UA agent bridges — to pressure-test the risk model and tell
 me where a neutral audit/approval gate should sit (driver, sidecar, or host). No pitch.
 
-Built on AgentBridge (Apache-2.0).
+## License
+
+WaferTrust is licensed under the [Apache License 2.0](LICENSE).
+Copyright 2026 Haider Ali. Built on AgentBridge (Apache-2.0).
