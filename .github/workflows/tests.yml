@@ -1,0 +1,50 @@
+name: tests
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      # WaferTrust and the AgentBridge kernel must be sibling directories: the demo
+      # imports the kernel from ../agentbridge relative to its own files.
+      - name: Checkout WaferTrust
+        uses: actions/checkout@v4
+        with:
+          path: wafertrust
+
+      - name: Checkout AgentBridge kernel (verified commit)
+        uses: actions/checkout@v4
+        with:
+          repository: shadowhunter-92/agentbridge
+          ref: f309a35cb5c3ec4164acea5ba2622dc04be6807c
+          path: agentbridge
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r wafertrust/requirements.txt
+
+      - name: Run hardening tests
+        working-directory: wafertrust
+        run: python -m unittest test_hardening -v
+
+      - name: Run SECS/GEM demo
+        working-directory: wafertrust
+        run: python demo.py
+
+      - name: Run maintenance demo
+        working-directory: wafertrust
+        run: python maintenance_demo.py
+
+      - name: Re-verify exported flight recorders
+        working-directory: wafertrust
+        run: |
+          python verify_export.py audit
+          python verify_export.py maintenance

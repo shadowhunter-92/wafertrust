@@ -1,0 +1,21 @@
+# WaferTrust demo — runtime dependencies
+#
+# The demo wraps the AgentBridge governance kernel, which is NOT pip-installed: it is
+# cloned as a sibling directory (../agentbridge) and imported from source. These are the
+# kernel's runtime dependencies that the governance plane pulls in (Ed25519 identity and
+# signed checkpoints via cryptography; the gateway also imports the kernel's observability
+# and protocol-registry modules, which need fastapi / pydantic / prometheus-client).
+#
+# Versions below are pinned to the set verified against public AgentBridge kernel
+# f309a35cb5c3ec4164acea5ba2622dc04be6807c (14/14 hardening tests, both demos, both
+# exported flight recorders re-verified). Requires Python >= 3.11.
+#
+# Install:  pip install -r requirements.txt
+# Tests use the stdlib unittest runner, so no test-only packages are required.
+
+cryptography==50.0.2
+fastapi==0.162.7
+prometheus-client==0.26.0
+pydantic==2.14.3
+PyJWT==2.15.1
+uvicorn==0.54.0

@@ -1,5 +1,7 @@
 # WaferTrust
 
+[![tests](https://github.com/shadowhunter-92/wafertrust/actions/workflows/tests.yml/badge.svg)](https://github.com/shadowhunter-92/wafertrust/actions/workflows/tests.yml)
+
 **The trust layer for every wafer.** A neutral governance prototype for AI agents that act on
 semiconductor fab equipment — fail-closed Ed25519 caller authentication, a read-only "flight
 recorder" with a signed checkpoint, approval-gated writes, and illustrative wafer-dollar risk
@@ -60,6 +62,38 @@ Same simulated equipment, same demo agent — two outcomes:
   verifies `True`. This demonstrates authentication, approval, and budget enforcement, not
   detection of unsafe setpoints or a guarantee of preventing real wafer losses.
 
+## Architecture
+
+The gateway is a thin fab-semantics wrapper; the trust decisions are made by AgentBridge's
+real kernel. Every call — allowed or denied — is appended to the hash-chained audit.
+
+```mermaid
+flowchart TD
+    A["Demo agent<br/>holds Ed25519 private key"] -->|"signs tool + args + operation_id + nonce"| G
+
+    subgraph WT["WaferTrust · fab_gateway.py"]
+        G["governed_call<br/>builds MCP tools/call wire + request-bound proof"]
+    end
+
+    G --> K
+
+    subgraph AB["AgentBridge kernel · real GovernanceGateway (require_verified=True)"]
+        K["route_call"] --> ID["IdentityRegistry<br/>verify Ed25519 proof — fail-closed"]
+        ID --> POL["PolicyEngine<br/>AllowOnlyCapabilities · RequireApprovalAboveCost · MaxCostPerCall"]
+        POL --> BUD["BudgetManager<br/>wafer-dollar spend + per-call cap"]
+        BUD --> APP["ApprovalQueue<br/>one-shot, request-bound grants"]
+        APP --> AUD["AuditLog<br/>hash-chained SQLite store"]
+    end
+
+    APP -->|"allowed"| EQ["Equipment simulator<br/>equipment.py / maintenance_system.py"]
+    APP -->|"denied / needs approval"| DENY["GovernanceError<br/>denial is audited too"]
+
+    OP["Operator<br/>separate key"] -->|"approve by approval_id"| APP
+    AUD --> EXP["export_flight_recorder<br/>full-field JSONL + signed checkpoint + call journal"]
+    OP -->|"signs checkpoint over chain head"| EXP
+    EXP --> VER["verify_export.py<br/>standalone re-verification, no simulator"]
+```
+
 ## How it maps to the SEMI equipment-cybersecurity standards
 
 *Conceptual alignment, not compliance or certification. The demo runs on simulator stubs.*
@@ -104,25 +138,70 @@ The hash chain detects edits within the retained history; it is not WORM storage
 independent proof of a destination effect. Demo keys are generated fresh per run; a real
 deployment needs durable key custody and an external anchor for checkpoints.
 
-## Run
+## Quickstart
 
-Requires Python 3.12+ and AgentBridge cloned alongside this folder:
+Python 3.12+ and Git. Clone the demo and the AgentBridge kernel as siblings, install the
+pinned dependencies, and run — one paste in Git Bash (Linux/macOS: swap the activate line):
 
 ```bash
-git clone https://github.com/shadowhunter-92/agentbridge ../agentbridge
-PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python demo.py
-PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python maintenance_demo.py
-PYTHONIOENCODING=utf-8 PYTHONUTF8=1 python -m unittest test_hardening -v
+git clone https://github.com/shadowhunter-92/wafertrust
+git clone https://github.com/shadowhunter-92/agentbridge
+cd wafertrust
+python -m venv .venv
+source .venv/Scripts/activate        # Linux/macOS: source .venv/bin/activate
+pip install -r requirements.txt
+
+PYTHONUTF8=1 python demo.py
+PYTHONUTF8=1 python maintenance_demo.py
+PYTHONUTF8=1 python -m unittest test_hardening -v
+python verify_export.py audit
+python verify_export.py maintenance
+```
+
+`fab_gateway.py` resolves the kernel at `../agentbridge`, so the two folders must stay
+siblings. The same steps run in CI ([`.github/workflows/tests.yml`](.github/workflows/tests.yml)),
+which pins the kernel to a verified commit.
+
+### What a run looks like
+
+Captured verbatim from a real `demo.py` run (approval IDs and hashes are regenerated each
+run; full transcript in [`secsgem-run-log.txt`](secsgem-run-log.txt)):
+
+```text
+SCENE 1 — UNGOVERNED: an agent changes a setpoint directly
+  Result: {'ok': False, 'scrappedWafers': 25, 'damageUsd': 500000, 'reason': '500.0 outside [200,450]'}
+  >> 25 wafers scrapped, $500,000 lost,
+     and NO tamper-evident record of who did it or why.
+
+SCENE 3 — GOVERNED: a write is BLOCKED pending human approval
+  [write] BLOCKED  approval required for 'set_equipment_constant'
+
+SCENE 4 — Human approves; the write executes within budget
+  [write] ALLOWED  cost=$500,000  -> {'ok': True, 'ecid': 2001, 'value': 400.0}
+  Budget spent $500,000 / $600,000; remaining $100,000
+
+SCENE 5 — Wafer-dollar circuit breaker: budget exhausted
+  [write] BLOCKED  spend cap exceeded (500000.0+0+500000.0 > 600000)
+  >> Even with approval, the action is denied: it would risk more
+     wafer-dollars than the shift budget allows.
+
+SCENE 6 — IMPERSONATION: a forged call is denied fail-closed
+  [forged] BLOCKED  request-bound signed agent proof required
+
+SCENE 7 — The flight recorder: complete, signed, independently verifiable
+  Audit integrity verified (durable chain): True
+  Signed checkpoint (operator key) -> audit-checkpoint.json: verified True
+  Independent re-verification from the exported file: True
 ```
 
 Each demo run recreates its own SQLite governance store (`*.sqlite3`, gitignored); the
-exported JSONL/checkpoint/journal files are the shareable evidence. `fab_gateway.py` adds
-`../agentbridge` to the path and sets `AGENTBRIDGE_ENV=production` process-wide for
-fail-closed admission — this is a single-process demo, not a mixed-mode library.
-The equipment/maintenance systems are laptop-only simulator stubs, with no real fab hardware.
-A real integration would need an actual equipment connector, durable operator key custody,
-externally anchored checkpoints, and deployment-specific risk policies. Those are not
-implemented here. **Engineering alpha — a prototype, not a production system.**
+exported JSONL/checkpoint/journal files are the shareable evidence. `fab_gateway.py` sets
+`AGENTBRIDGE_ENV=production` process-wide for fail-closed admission — this is a single-process
+demo, not a mixed-mode library. The equipment/maintenance systems are laptop-only simulator
+stubs, with no real fab hardware. A real integration would need an actual equipment connector,
+durable operator key custody, externally anchored checkpoints, and deployment-specific risk
+policies. Those are not implemented here. **Engineering alpha — a prototype, not a production
+system.**
 
 ## Status & what I'm looking for
 
@@ -130,6 +209,9 @@ Independent, bootstrapped, validating whether this is worth building. I'm lookin
 **critique and design partners** — fab automation / OT-security practitioners and the
 maintainers of SECS/GEM and OPC UA agent bridges — to pressure-test the risk model and tell
 me where a neutral audit/approval gate should sit (driver, sidecar, or host). No pitch.
+
+See [THREAT_MODEL.md](THREAT_MODEL.md) for the assets, trust boundaries, tested mitigations,
+and the explicit non-goals (no process-physics safety, no WORM, no durable key custody).
 
 ## License
 
