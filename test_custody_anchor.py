@@ -19,6 +19,8 @@ from src.governance import AgentIdentity, AuditLog
 from src.governance.store import InMemoryStore
 import anchor
 import tsa
+from equipment import SecsGemEquipment
+from fab_gateway import FabGovernanceGateway
 
 
 def run(coro):
@@ -117,6 +119,46 @@ class TsaCase(unittest.TestCase):
             c = tsa.TsaClient("https://freetsa.org/tsr", b"CERT")
             with self.assertRaises(tsa.TsaError):
                 c.timestamp(b"digest")
+
+
+class GatewayCustodyCase(unittest.TestCase):
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.db = os.path.join(self._tmp.name, "g.sqlite3")
+        self.ks = os.path.join(self._tmp.name, "keys.json")
+        self._gateways = []
+
+    def _gw(self, **kw):
+        g = FabGovernanceGateway(SecsGemEquipment(), db_path=self.db, **kw)
+        self._gateways.append(g)
+        return g
+
+    def tearDown(self):
+        for g in self._gateways:
+            try:
+                g.gw.identities.store.close()
+            except Exception:
+                pass
+        self._tmp.cleanup()
+
+    def test_durable_identity_across_restart(self):
+        k = Keystore(self.ks, "pw")
+        g1 = self._gw(keystore=k)
+        pub = g1.identity.public_key_hex
+        g1.gw.identities.store.close()
+        k2 = Keystore(self.ks, "pw")
+        g2 = self._gw(keystore=k2)
+        self.assertEqual(pub, g2.identity.public_key_hex)
+
+    def test_export_witness_and_anchor_flag(self):
+        g = self._gw()
+        run(g.governed_call("get_equipment_status", {}))
+        paths = g.export_flight_recorder(self._tmp.name, "audit")
+        self.assertIn("witness", paths)
+        self.assertIn("anchor", paths)
+        with open(paths["anchor"], encoding="utf-8") as fh:
+            meta = json.load(fh)
+        self.assertFalse(meta["independently_time_anchored"])
 
 
 if __name__ == "__main__":

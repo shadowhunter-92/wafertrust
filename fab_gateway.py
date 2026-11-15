@@ -42,6 +42,8 @@ from src.governance import (  # noqa: E402
     GovernanceGateway, GovernanceError,
     AuditLog, SqliteStore, canonical_payload,
 )
+import anchor  # noqa: E402
+from tsa import TsaError  # noqa: E402
 
 READ_TOOLS = [
     "get_equipment_status", "list_status_variables", "get_status_variable",
@@ -66,9 +68,11 @@ TOOL_COSTS = {
 class FabGovernanceGateway:
     def __init__(self, equipment, *, agent_id="fab-maintenance-agent",
                  budget_limit=600_000, approval_threshold=100_000, max_cost=750_000,
-                 read_tools=None, write_tools=None, tool_costs=None, db_path=None):
+                 read_tools=None, write_tools=None, tool_costs=None, db_path=None,
+                 keystore=None, tsa_client=None):
         self.equipment = equipment
         self.agent_id = agent_id
+        self.tsa_client = tsa_client
         self.read_tools = READ_TOOLS if read_tools is None else read_tools
         self.write_tools = WRITE_TOOLS if write_tools is None else write_tools
         self.tool_costs = TOOL_COSTS if tool_costs is None else tool_costs
@@ -86,12 +90,23 @@ class FabGovernanceGateway:
         self.store = SqliteStore(db_path or os.path.join(_HERE, "wafertrust-governance.sqlite3"))
 
         # The agent keeps its private key; the registry only ever sees the public half.
-        self.identity = AgentIdentity.generate(agent_id)
+        # With a keystore, the agent/operator/witness keys persist encrypted at rest and
+        # survive restarts; otherwise they are generated per run (ephemeral demo behavior).
+        if keystore is not None:
+            self.identity = keystore.load_or_generate(agent_id)
+            self.operator = keystore.load_or_generate(agent_id + ":operator")
+            self.witness = keystore.load_or_generate(agent_id + ":witness")
+            keystore.save()
+        else:
+            self.identity = AgentIdentity.generate(agent_id)
+            # Separate custodian key: checkpoints are the operator's statement about
+            # the log head, not another caller signature.
+            self.operator = AgentIdentity.generate(agent_id + ":operator")
+            # Independent witness key for the two-party anchor envelope (must differ
+            # from the operator key; the kernel rejects a self-witnessed checkpoint).
+            self.witness = AgentIdentity.generate(agent_id + ":witness")
         self.identities = IdentityRegistry(self.store)
         self.identities.register(self.identity)
-        # Separate custodian key: checkpoints are the operator's statement about
-        # the log head, not another caller signature.
-        self.operator = AgentIdentity.generate(agent_id + ":operator")
 
         self.budgets = BudgetManager(self.store)
         self.budgets.set_budget(agent_id, Budget(spend_limit=budget_limit, rate_limit=1000))
@@ -158,7 +173,8 @@ class FabGovernanceGateway:
 
     def export_flight_recorder(self, out_dir: str, stem: str) -> dict:
         """Write the complete flight recorder: full-field audit JSONL, an
-        Ed25519-signed checkpoint over the chain head, and the call journal
+        Ed25519-signed checkpoint over the chain head, an independent-witness
+        anchor envelope (optionally TSA time-anchored), and the call journal
         (exact arguments + outcomes bound to audit entry hashes)."""
         audit = self.gw.audit
         paths = {
@@ -171,6 +187,34 @@ class FabGovernanceGateway:
         checkpoint = audit.checkpoint(self.operator.sign, self.operator.public_key_hex)
         with open(paths["checkpoint"], "w", encoding="utf-8") as fh:
             json.dump(checkpoint, fh, indent=2)
+            fh.write("\n")
+        # Independent-witness anchor over the checkpoint. Optionally time-anchor the
+        # checkpoint digest with a remote TSA first; on any TSA failure we degrade to
+        # witness-only (never block the export). The witness key differs from the
+        # operator key, so this proves the two-party protocol — not independent custody.
+        paths["witness"] = os.path.join(out_dir, f"{stem}-witness.json")
+        paths["anchor"] = os.path.join(out_dir, f"{stem}-anchor.json")
+        anchor_ref, time_anchored = "local-witness-only", False
+        if self.tsa_client is not None:
+            digest = anchor.checkpoint_digest(checkpoint).encode("utf-8")
+            try:
+                token = self.tsa_client.timestamp(digest)
+                if self.tsa_client.verify(token, digest):
+                    paths["tsa_token"] = os.path.join(out_dir, f"{stem}-tsa-token.der")
+                    with open(paths["tsa_token"], "wb") as fh:
+                        fh.write(token)
+                    anchor_ref, time_anchored = f"tsa:{self.tsa_client.url}", True
+            except TsaError:
+                pass
+        witness = anchor.create_witness(checkpoint, self.witness, anchor_reference=anchor_ref)
+        with open(paths["witness"], "w", encoding="utf-8") as fh:
+            json.dump(witness, fh, indent=2)
+            fh.write("\n")
+        with open(paths["anchor"], "w", encoding="utf-8") as fh:
+            json.dump({"independently_time_anchored": time_anchored,
+                       "anchor_reference": anchor_ref,
+                       "operator_key_hex": self.operator.public_key_hex,
+                       "witness_key_hex": self.witness.public_key_hex}, fh, indent=2)
             fh.write("\n")
         with open(paths["journal"], "w", encoding="utf-8") as fh:
             for rec in self.journal:
