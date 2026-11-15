@@ -3,3 +3,7 @@ __pycache__/
 .venv/
 *.egg-info/
 *.sqlite3
+
+# Encrypted key custody — never commit keystores or private keys.
+*.keystore.json
+keys.json

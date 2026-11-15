@@ -2,8 +2,9 @@
 
 **Status: engineering alpha.** This describes the security properties of the *demo* as it
 exists today, on laptop-only simulators. It is not a production security assessment, a
-compliance claim, or a safety case. Read it together with the [README](README.md) and the
-14 tests in [`test_hardening.py`](test_hardening.py).
+compliance claim, or a safety case. Read it together with the [README](README.md), the
+14 tests in [`test_hardening.py`](test_hardening.py), and the custody/anchoring tests in
+[`test_custody_anchor.py`](test_custody_anchor.py).
 
 ## 1. What this is
 
@@ -29,12 +30,14 @@ the authentication and authorization paths are the kernel's real ones, not stubs
 | Demo agent | holding its own Ed25519 private key | self-authorizing writes; it must pass the kernel |
 | AgentBridge kernel | verifying proofs, enforcing policy/budget/approval, appending audit | physical safety; it governs *tool access*, not process physics |
 | Operator | approving requests and signing checkpoints | being infallible — a compromised operator key defeats the checkpoint |
+| Witness key | co-signing the checkpoint anchor envelope | independent custody — in the demo it lives on the same host as the operator |
 | SQLite store | durability within a run | tamper-proofing against an attacker who controls the host |
 | Equipment simulator | returning deterministic stub results | representing real fab behavior |
 
 The agent keeps its private key; the registry only ever sees the public half. The operator
 key is distinct from the agent key, so a checkpoint is the operator's statement, not another
-caller signature.
+caller signature. A third, distinct witness key co-signs the anchor envelope; the kernel
+rejects a checkpoint witnessed by the same key that signed it.
 
 ## 4. Threats considered and mitigated (each is tested)
 
@@ -56,6 +59,10 @@ caller signature.
 - **Export / checkpoint tampering** — the exported chain, the signed checkpoint, and the
   journal-to-entry-hash links are re-verified from the files alone; altering any of them fails
   verification.
+- **Checkpoint rollback / truncation past an anchor** — the independent-witness envelope binds
+  the checkpoint digest and sequence; `verify_export.py` rejects a truncated or forked chain and
+  a checkpoint witnessed by the operator's own key. With `--operator-key`/`--witness-key` the
+  trust roots are pinned independently; without them the check is self-consistency only (warned).
 
 ## 5. Explicit non-goals (out of scope today)
 
@@ -70,10 +77,16 @@ These are **not** provided, and no claim is made otherwise:
 - **Per-entry signatures.** Entries are hash-chained, not individually signed. The signed
   checkpoint authenticates *who signed it*, not independent custody or the equipment's actual
   outcome.
-- **External anchoring.** Checkpoints are not timestamped (RFC 3161) or published to an
-  append-only log. A checkpoint can be re-signed by a compromised operator key.
-- **Durable key custody.** Demo agent and operator keys are generated fresh per run and held
-  in-process. There is no keystore, HSM, rotation, or revocation.
+- **Independent custody / qualified anchoring.** An offline two-party witness envelope and an
+  *optional* RFC 3161 TSA time anchor are now provided, but the witness key lives on the same
+  host (so it is **not** independent custody), the TSA is FreeTSA (a free public service, **not**
+  a qualified timestamp authority), and nothing is published to an append-only public log. A
+  compromised operator key can still re-sign a checkpoint; the time anchor only proves the
+  checkpoint digest existed at a point in time.
+- **HSM-grade key custody.** An *optional* encrypted keystore (AES-256-GCM under a scrypt
+  passphrase key) now persists agent/operator/witness keys at rest, but it is encryption on the
+  same host — not an HSM or remote key manager — with no rotation or revocation. The demos still
+  default to ephemeral, generate-per-run keys. Host compromise remains out of scope.
 - **Transport / network security.** Calls are in-process. There is no TLS, no MCP server
   socket, no SECS/GEM HSMS link to harden.
 - **Host / operator compromise.** A compromised host or operator key is outside the model.
@@ -91,6 +104,10 @@ These are **not** provided, and no claim is made otherwise:
 
 ## 7. What a real deployment would need
 
-An actual equipment connector (e.g. a SECS/GEM driver), durable operator key custody, externally
-anchored checkpoints, deployment-specific risk policies, transport hardening, and a physical
-safety layer independent of this access-control layer. None of those are implemented here.
+An actual equipment connector (e.g. a SECS/GEM driver), HSM-grade operator key custody with
+rotation and revocation, an independent witness service in a separate trust domain (or a
+qualified TSA) rather than the same-host witness and free FreeTSA used here, deployment-specific
+risk policies, transport hardening, and a physical safety layer independent of this
+access-control layer. The demo now offers an encrypted-at-rest keystore, an offline witness
+envelope, and an optional FreeTSA time anchor as stepping stones — not as substitutes for any of
+the above.

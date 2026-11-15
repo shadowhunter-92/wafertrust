@@ -31,9 +31,9 @@ jobs:
       - name: Install dependencies
         run: pip install -r wafertrust/requirements.txt
 
-      - name: Run hardening tests
+      - name: Run hardening + custody/anchor tests
         working-directory: wafertrust
-        run: python -m unittest test_hardening -v
+        run: python -m unittest test_hardening test_custody_anchor -v
 
       - name: Run SECS/GEM demo
         working-directory: wafertrust

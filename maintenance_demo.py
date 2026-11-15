@@ -20,6 +20,7 @@ from maintenance_system import MaintenanceSystem
 from fab_gateway import (
     FabGovernanceGateway, AgentIdentity, AuditLog, GovernanceError, canonical_payload,
 )
+import anchor
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(HERE, "maintenance-governance.sqlite3")
@@ -124,6 +125,22 @@ async def main():
     print(f"  Exported {len(records)} full-field entries -> {os.path.basename(paths['jsonl'])}")
     print(f"  Signed checkpoint (operator key) -> {os.path.basename(paths['checkpoint'])}: "
           f"verified {AuditLog.verify_checkpoint(checkpoint)}")
+    wpath = paths.get("witness")
+    if wpath:
+        with open(wpath, encoding="utf-8") as fh:
+            witness = json.load(fh)
+        with open(paths["anchor"], encoding="utf-8") as fh:
+            meta = json.load(fh)
+        anchor_ok = True
+        try:
+            anchor.verify_anchor(records, checkpoint, witness,
+                                 operator_key_hex=meta["operator_key_hex"],
+                                 witness_key_hex=meta["witness_key_hex"])
+        except Exception:
+            anchor_ok = False
+        print(f"  Independent witness over checkpoint -> {os.path.basename(wpath)}: "
+              f"verified {anchor_ok}")
+        print(f"  Independently time-anchored (TSA): {meta['independently_time_anchored']}")
     print(f"  Call journal (arguments + outcomes) -> {os.path.basename(paths['journal'])}")
     print(f"  Independent re-verification from the exported file: "
           f"{AuditLog.verify_chain(records, require_genesis=True)}")

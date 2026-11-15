@@ -37,6 +37,12 @@ boundary: read calls are logged, and writes require approval and sufficient conf
   statement, not independent custody or the equipment's actual outcome.
 - **A call journal.** Every governed call's exact arguments and outcome are recorded and bound
   to its audit entry hash, so the sequence of what ran can be reconstructed afterwards.
+- **Optional durable keys + anchored checkpoints.** An encrypted keystore (AES-256-GCM under a
+  scrypt passphrase) can persist the agent/operator/witness keys across restarts, and each export
+  adds an independent-witness anchor envelope plus an optional RFC 3161 TSA time anchor. The
+  demos default to ephemeral keys and witness-only anchoring. This is encryption at rest and an
+  offline witness on the same host — not an HSM, not independent custody, and FreeTSA is not a
+  qualified timestamp authority (details below).
 - **Fab-first, MCP-wire integration.** Reads, equipment constants, process jobs, and carriers
   are routed through the MCP `tools/call` representation. This is a library demo, not a
   standalone MCP server or a live SECS/GEM connection.
@@ -89,9 +95,39 @@ flowchart TD
     APP -->|"denied / needs approval"| DENY["GovernanceError<br/>denial is audited too"]
 
     OP["Operator<br/>separate key"] -->|"approve by approval_id"| APP
-    AUD --> EXP["export_flight_recorder<br/>full-field JSONL + signed checkpoint + call journal"]
+    AUD --> EXP["export_flight_recorder<br/>full-field JSONL + signed checkpoint + call journal + witness anchor"]
     OP -->|"signs checkpoint over chain head"| EXP
     EXP --> VER["verify_export.py<br/>standalone re-verification, no simulator"]
+```
+
+## Durable keys + anchored checkpoints (optional)
+
+The demos generate fresh keys each run and anchor checkpoints with an offline witness. Two
+optional layers let a longer-lived deployment go further — both are **stepping stones, not
+production custody or qualified anchoring**.
+
+- **Encrypted keystore (`keystore.py`).** Pass a `Keystore(path, passphrase)` to the gateway and
+  the agent, operator, and witness keys persist across restarts. Keys are encrypted at rest with
+  AES-256-GCM under a scrypt-derived passphrase key; the file is written atomically. Omit it (the
+  demo default) and keys stay ephemeral. This is encryption on the same host — **not an HSM or a
+  remote key manager** — with no rotation or revocation. Keystores are gitignored; never commit one.
+- **Independent-witness anchor (`anchor.py`).** Every export adds a witness envelope: a third,
+  distinct Ed25519 key co-signs the checkpoint digest and sequence. The kernel rejects a checkpoint
+  witnessed by the same key that signed it, and `verify_export.py` rejects a truncated or forked
+  chain past the anchor. In the demo the witness key lives on the same host, so this is an offline
+  two-party check — **not independent custody**.
+- **Optional RFC 3161 time anchor (`tsa.py`).** Pass a `TsaClient` and each export also timestamps
+  the checkpoint digest with a TSA, saving a DER token. The pinned cert (`tsa/freetsa.pem`) is
+  FreeTSA's public TSA signing certificate — a free service, **not a qualified timestamp authority**.
+  The time anchor only proves the digest existed at a point in time; it is not independent custody,
+  and nothing is published to an append-only public log. Tests and CI mock the client, so no network
+  is needed to run the suite.
+
+Verify an export with independently pinned trust roots (otherwise the witness check is
+self-consistency only, and the verifier warns):
+
+```bash
+python verify_export.py audit --operator-key "$OPERATOR_PUB_HEX" --witness-key "$WITNESS_PUB_HEX"
 ```
 
 ## How it maps to the SEMI equipment-cybersecurity standards
@@ -110,8 +146,12 @@ flowchart TD
 |------|----------|
 | `demo.py` | SECS/GEM equipment: 7 scenes (ungoverned scrap → governed reads → approval-gated write → budget circuit breaker → impersonation denied → complete signed export). |
 | `maintenance_demo.py` | Maintenance/facilities wedge: read-only flight recorder + approval-gated `dispatch_work_order` + impersonation denied (6 scenes). |
-| `verify_export.py` | Standalone verifier: re-checks an exported chain, checkpoint signature, and journal linkage without the simulator. |
+| `verify_export.py` | Standalone verifier: re-checks an exported chain, checkpoint signature, journal linkage, and witness anchor (with optional pinned trust roots + TSA token) without the simulator. |
 | `test_hardening.py` | 14 tests: fail-closed authentication, request-bound approvals, budget breaker, idempotency, export/checkpoint tamper detection. |
+| `test_custody_anchor.py` | 13 tests: encrypted keystore round-trip + wrong-passphrase rejection, witness anchor + tamper detection, mocked TSA, durable identity across restart, pinned-root verification. |
+| `keystore.py` | Optional encrypted-at-rest key custody (AES-256-GCM under a scrypt passphrase); persists agent/operator/witness keys across restarts. |
+| `anchor.py` | Independent-witness anchor wrapper over the kernel's `external_anchor`; creates and verifies a witness envelope over the checkpoint. |
+| `tsa.py` | Optional RFC 3161 TSA adapter (`rfc3161ng`); timestamps the checkpoint digest. Mocked in tests/CI; pinned FreeTSA cert for live use. |
 | `equipment.py` | In-process SECS/GEM equipment simulator. Mirrors the go-factory-io / secsgem-mcp-server data model (SV, EC, alarms, process jobs, carriers, E191-style report) so the demo runs laptop-only. |
 | `maintenance_system.py` | Maintenance-system stub (assets, sensors, work orders). |
 | `fab_gateway.py` | Governance gateway wrapping AgentBridge's trust kernel; governs 6 read + 4 write tools at the MCP boundary with request-bound signed proofs. |
@@ -123,6 +163,12 @@ flowchart TD
   reason, cost, prev_hash, entry_hash). Independently verifiable from the file alone.
 - `audit-checkpoint.json`, `maintenance-checkpoint.json` — Ed25519-signed checkpoints over the
   chain head, produced with a separate operator key.
+- `audit-witness.json`, `maintenance-witness.json` — independent-witness envelopes co-signing the
+  checkpoint digest and sequence with a third, distinct key.
+- `audit-anchor.json`, `maintenance-anchor.json` — anchor metadata: the operator/witness public
+  keys, the anchor reference, and whether an independent time anchor was applied.
+- `audit-tsa-token.der`, `maintenance-tsa-token.der` — *optional* RFC 3161 TSA tokens, present only
+  when a `TsaClient` is configured (the demos default to witness-only, so these are absent).
 - `audit-call-journal.jsonl`, `maintenance-call-journal.jsonl` — exact tool arguments and
   outcomes for every governed call, bound to audit entry hashes.
 - `secsgem-run-log.txt`, `maintenance-run-log.txt` — console run logs from the current code.
@@ -135,8 +181,10 @@ python verify_export.py maintenance
 ```
 
 The hash chain detects edits within the retained history; it is not WORM storage or
-independent proof of a destination effect. Demo keys are generated fresh per run; a real
-deployment needs durable key custody and an external anchor for checkpoints.
+independent proof of a destination effect. The demos generate fresh keys per run and use an
+offline, same-host witness; the optional encrypted keystore and FreeTSA time anchor (above) are
+stepping stones, not HSM-grade custody or qualified anchoring. A real deployment still needs
+independent key custody and an external anchor in a separate trust domain.
 
 ## Quickstart
 
@@ -153,7 +201,7 @@ pip install -r requirements.txt
 
 PYTHONUTF8=1 python demo.py
 PYTHONUTF8=1 python maintenance_demo.py
-PYTHONUTF8=1 python -m unittest test_hardening -v
+PYTHONUTF8=1 python -m unittest test_hardening test_custody_anchor -v
 python verify_export.py audit
 python verify_export.py maintenance
 ```
@@ -191,17 +239,20 @@ SCENE 6 — IMPERSONATION: a forged call is denied fail-closed
 SCENE 7 — The flight recorder: complete, signed, independently verifiable
   Audit integrity verified (durable chain): True
   Signed checkpoint (operator key) -> audit-checkpoint.json: verified True
+  Independent witness over checkpoint -> audit-witness.json: verified True
+  Independently time-anchored (TSA): False
   Independent re-verification from the exported file: True
 ```
 
 Each demo run recreates its own SQLite governance store (`*.sqlite3`, gitignored); the
-exported JSONL/checkpoint/journal files are the shareable evidence. `fab_gateway.py` sets
-`AGENTBRIDGE_ENV=production` process-wide for fail-closed admission — this is a single-process
+exported JSONL/checkpoint/journal/witness/anchor files are the shareable evidence. `fab_gateway.py`
+sets `AGENTBRIDGE_ENV=production` process-wide for fail-closed admission — this is a single-process
 demo, not a mixed-mode library. The equipment/maintenance systems are laptop-only simulator
 stubs, with no real fab hardware. A real integration would need an actual equipment connector,
-durable operator key custody, externally anchored checkpoints, and deployment-specific risk
-policies. Those are not implemented here. **Engineering alpha — a prototype, not a production
-system.**
+HSM-grade operator key custody, an independently anchored checkpoint in a separate trust domain,
+and deployment-specific risk policies. The optional encrypted keystore, offline witness, and
+FreeTSA time anchor here are stepping stones toward those — not substitutes. **Engineering alpha —
+a prototype, not a production system.**
 
 ## Status & what I'm looking for
 
@@ -211,7 +262,7 @@ maintainers of SECS/GEM and OPC UA agent bridges — to pressure-test the risk m
 me where a neutral audit/approval gate should sit (driver, sidecar, or host). No pitch.
 
 See [THREAT_MODEL.md](THREAT_MODEL.md) for the assets, trust boundaries, tested mitigations,
-and the explicit non-goals (no process-physics safety, no WORM, no durable key custody).
+and the explicit non-goals (no process-physics safety, no WORM, no HSM-grade or independent custody).
 
 ## License
 
