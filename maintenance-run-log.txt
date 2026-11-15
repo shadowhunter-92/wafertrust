@@ -19,12 +19,12 @@ SCENE 2 — The agent RECOMMENDS a work order (audited, no actuation)
 SCENE 3 — DISPATCH is BLOCKED: it takes a tool offline (wafer-risk)
 ========================================================================
   [dispatch] BLOCKED  approval required for 'dispatch_work_order'
-           pending human approval: 9c91bae2dcd24611bb7af2ed38661e7b
+           pending human approval: 05915ae1011646f4b150a002794f8963
 
 ========================================================================
 SCENE 4 — Human approves; dispatch executes within the wafer budget
 ========================================================================
-  Operator approves 9c91bae2dcd24611bb7af2ed38661e7b: True
+  Operator approves 05915ae1011646f4b150a002794f8963: True
   [dispatch] ALLOWED  cost=$200,000  -> {'ok': True, 'workOrderId': 'WO-001', 'assetId': 'UPW-PUMP-01', 'toolOffline': True, 'waferRiskUsd': 200000}
   Wafer-budget spent $200,000 / $300,000; remaining $100,000
 
@@ -37,16 +37,18 @@ SCENE 5 — IMPERSONATION: a forged dispatch is denied fail-closed
 ========================================================================
 SCENE 6 — The flight recorder: every recommendation + action, verifiable
 ========================================================================
-  #0  allow read_sensor_trends       88565addbb48  authorized
-  #1  allow get_asset_health         1a424dc67d22  authorized
-  #2  allow recommend_work_order     a30b160a97cd  authorized
-  #3  deny  dispatch_work_order      5ca1818fac5b  approval required for 'dispatch_work_order'
-  #4  allow dispatch_work_order      57c52c754886  authorized
-  #5  deny  dispatch_work_order      eec40af7e23e  request-bound signed agent proof required
+  #0  allow read_sensor_trends       326c1a7096cf  authorized
+  #1  allow get_asset_health         2d6e7c400311  authorized
+  #2  allow recommend_work_order     41d85c7b9f58  authorized
+  #3  deny  dispatch_work_order      bc09ad121bef  approval required for 'dispatch_work_order'
+  #4  allow dispatch_work_order      47047ea984b4  authorized
+  #5  deny  dispatch_work_order      e7d0ea316719  request-bound signed agent proof required
 
   Audit integrity verified (durable chain): True
   Exported 6 full-field entries -> maintenance-flight-recorder.jsonl
   Signed checkpoint (operator key) -> maintenance-checkpoint.json: verified True
+  Independent witness over checkpoint -> maintenance-witness.json: verified True
+  Independently time-anchored (TSA): False
   Call journal (arguments + outcomes) -> maintenance-call-journal.jsonl
   Independent re-verification from the exported file: True
   Check it yourself: python verify_export.py maintenance

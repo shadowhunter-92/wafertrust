@@ -23,12 +23,12 @@ SCENE 2 — GOVERNED: read-only flight recorder (pass-through + audit)
 SCENE 3 — GOVERNED: a write is BLOCKED pending human approval
 ========================================================================
   [write] BLOCKED  approval required for 'set_equipment_constant'
-           pending human approval: 017110d66cf74c3abb4495fd69083e6d
+           pending human approval: ab45af274d4e49f585d82226b9153dcd
 
 ========================================================================
 SCENE 4 — Human approves; the write executes within budget
 ========================================================================
-  Operator approves 017110d66cf74c3abb4495fd69083e6d: True
+  Operator approves ab45af274d4e49f585d82226b9153dcd: True
   [write] ALLOWED  cost=$500,000  -> {'ok': True, 'ecid': 2001, 'value': 400.0}
   Budget spent $500,000 / $600,000; remaining $100,000
 
@@ -36,7 +36,7 @@ SCENE 4 — Human approves; the write executes within budget
 SCENE 5 — Wafer-dollar circuit breaker: budget exhausted
 ========================================================================
   [write] BLOCKED  approval required for 'execute_command'
-           pending human approval: e3cc5c5c256b46d397eef7529ccf534d
+           pending human approval: 4de9a4d748cd4a42bb42f5f0b4d008a3
   [write] BLOCKED  spend cap exceeded (500000.0+0+500000.0 > 600000)
   >> Even with approval, the action is denied: it would risk more
      wafer-dollars than the shift budget allows.
@@ -51,17 +51,19 @@ SCENE 6 — IMPERSONATION: a forged call is denied fail-closed
 ========================================================================
 SCENE 7 — The flight recorder: complete, signed, independently verifiable
 ========================================================================
-  #0  allow get_equipment_status     d6ee2c47739f  authorized
-  #1  allow list_alarms              c95d290aece5  authorized
-  #2  deny  set_equipment_constant   0c2f65a12aea  approval required for 'set_equipment_constant'
-  #3  allow set_equipment_constant   063368785b79  authorized
-  #4  deny  execute_command          3ec36d3c04f5  approval required for 'execute_command'
-  #5  deny  execute_command          21276ef74196  spend cap exceeded (500000.0+0+500000.0 > 600000)
-  #6  deny  execute_command          04a842caae73  request-bound signed agent proof required
+  #0  allow get_equipment_status     ddd64aff9540  authorized
+  #1  allow list_alarms              896454091d59  authorized
+  #2  deny  set_equipment_constant   93feab7e3899  approval required for 'set_equipment_constant'
+  #3  allow set_equipment_constant   09737a489c3e  authorized
+  #4  deny  execute_command          c015abe1c34e  approval required for 'execute_command'
+  #5  deny  execute_command          f0b71a41c91f  spend cap exceeded (500000.0+0+500000.0 > 600000)
+  #6  deny  execute_command          1154bd5e2c1d  request-bound signed agent proof required
 
   Audit integrity verified (durable chain): True
   Exported 7 full-field entries -> audit-flight-recorder.jsonl
   Signed checkpoint (operator key) -> audit-checkpoint.json: verified True
+  Independent witness over checkpoint -> audit-witness.json: verified True
+  Independently time-anchored (TSA): False
   Call journal (arguments + outcomes) -> audit-call-journal.jsonl
   Independent re-verification from the exported file: True
   Check it yourself: python verify_export.py audit

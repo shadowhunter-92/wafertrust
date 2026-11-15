@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "witness_id": "did:key:ed25519:f85f01d37d85ef0a12ddaa3df3bcf6704e0b16642a5bd3f9b6d01e66970434a5",
+  "checkpoint_sha256": "be938aea2a32fb86a6ab871607944fa03fe2d877f92c9a82378442088bff1cb0",
+  "seq": 6,
+  "head_hash": "e7d0ea3167196ae1480729061820fb11984ac215adffd8b21a221ce566d7bc1c",
+  "witnessed_at": "2026-11-15T02:22:52.797939+00:00",
+  "anchor_reference": "local-witness-only",
+  "signature_hex": "404a51f577d00351c2b0c9d34bd63ab1cb03a2fb9828fee266e9094ae39d1b48c5863f02a625c78207919a8ebf43790a743ceed52b541a2961ec9c62be15eb0e"
+}

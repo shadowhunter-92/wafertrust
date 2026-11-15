@@ -1,0 +1,6 @@
+{
+  "independently_time_anchored": false,
+  "anchor_reference": "local-witness-only",
+  "operator_key_hex": "83d4e0e58196c6c340802e5e6da04f8339d10582845fe67ed993b3ed3e949e61",
+  "witness_key_hex": "f85f01d37d85ef0a12ddaa3df3bcf6704e0b16642a5bd3f9b6d01e66970434a5"
+}
