@@ -71,16 +71,18 @@ data model as `equipment.py` so the demo narrative is consistent.
 - SECS-II handlers (registered via `SecsHandler.register_stream_function`):
   - **S1F1 → S1F2** (Are You There / On Line Data): returns `[MDLN="WaferTrustSim",
     SOFTREV="1.0"]`.
-  - **S1F3 → S1F4** (Selected Equipment Status Request / Data): returns requested SVIDs
-    with their values.
-  - **S2F13 → S2F14** (Equipment Constant Request / Data): returns requested ECIDs with
-    values.
+  - **S1F3 → S1F4** (Selected Equipment Status Request / Data): returns the requested
+    SVIDs' values as a positional list in request order (standard S1F4 carries values only).
+    An empty request list returns all SVs in ascending SVID order.
+  - **S2F13 → S2F14** (Equipment Constant Request / Data): returns the requested ECIDs'
+    values as a positional list in request order. Empty list returns all in ascending order.
   - **S2F15 → S2F16** (New Equipment Constant Send / Ack): for each `{ECID, ECV}`, if
     within `[min,max]` set the value and ack `EAC=0`; if out of range, do not change the
-    value, record an alarm + scrap (mirrors the stub blast radius), ack `EAC=1`.
+    value, record an alarm + scrap internally, ack `EAC=1`. S2F16 is the standard single
+    `EAC` byte (no scrap detail on the wire).
   - **S2F41 → S2F42** (Host Command Send / Ack): `RCMD` in {ABORT, ONLINE, OFFLINE}.
-    ABORT records scrap; ONLINE/OFFLINE set control state. Ack `CPACK=0` (accepted) or
-    `CPACK=1` (rejected, unknown command).
+    ABORT records scrap; ONLINE/OFFLINE set control state. Ack top-level `HCACK=0`
+    (accepted) or `HCACK=1` (rejected, unknown command); empty PARAMS list.
 - API:
   - `SecsEquipmentSim(port=5000, address="127.0.0.1")` — construct.
   - `.start()` — enable the HSMS server (background threads). `.stop()` — disable.
@@ -105,27 +107,36 @@ contract as the stub.
     and `mdlrn`/`softrev` come from S1F2. Note: S1F1/F2 does **not** carry GEM
     control/transport state, so this shape differs from the stub's
     `{communicationState, controlState, transportState}`; documented, not hidden.
-  - `get_status_variable(svid)` / `list_status_variables()` → S1F3/F4 → SV dict(s).
-    An empty SVID list requests all SVIDs (SEMI E5 convention); the sim returns all.
-  - `list_equipment_constants()` → S2F13/F14 → EC list.
-  - `set_equipment_constant(ecid, value)` → S2F15/F16 → `EAC=0` ⇒ `{ok:True, ecid, value}`;
-    `EAC!=0` ⇒ `{ok:False, ecid, reason, scrappedWafers, damageUsd}` (scrap info carried in
-    a private S2F16 extension or derived from the sim alarm; see Data mapping).
-  - `execute_command(command, params)` → S2F41/F42 → `CPACK=0` ⇒ `{ok:True, command,
-    controlState}`; else `{ok:False, command, reason}`.
+  - `get_status_variable(svid)` → S1F3 `[svid]` / F4 → `{svid, value}`.
+  - `list_status_variables()` → S1F3 `[1001,1002,1003]` / F4 → `[{svid, value}, ...]`.
+  - `list_equipment_constants()` → S2F13 `[2001,2002]` / F14 → `[{ecid, value}, ...]`.
+    S1F4/S2F14 carry **positional value lists** (SEMI E5: no IDs, names, or units in the
+    reply), so the adapter requests explicit IDs and zips them with the returned values.
+    The demo SVID/ECID set is a documented demo-data-model constant in the adapter; a real
+    host discovers IDs via S1F11/S2F29 name lists (out of scope). Returned shapes therefore
+    differ from the stub (no `name`/`unit`/`min`/`max`); documented, not hidden.
+  - `set_equipment_constant(ecid, value)` → S2F15 `[{ECID, ECV}]` / F16 → `EAC=0` ⇒
+    `{ok:True, ecid, value}`; `EAC!=0` ⇒ `{ok:False, ecid, reason}`.
+  - `execute_command(command, params)` → S2F41 `{RCMD, PARAMS}` / F42 → top-level `HCACK=0`
+    ⇒ `{ok:True, command}`; else `{ok:False, command, reason}`. (S2F42's top-level ack is
+    HCACK; per-parameter CPACK is not used by this bounded slice.)
   - `manage_process_job`, `manage_carrier`, `get_security_status`, `list_alarms` →
     **not wired** in HSMS mode: raise `HsmsError("tool not supported over HSMS: ...")`.
     Documented bounded scope.
 - Value extraction uses the secsgem SecsVar tree (`item.data["ECID"].value[0]` etc.),
   encapsulated in small private helpers so the mapping is unit-testable.
 
-### Data mapping note (S2F16 scrap info)
+### Data mapping note (all-standard SECS-II)
 
-Standard S2F16 carries only `EAC` (a single byte). To keep the wafer-dollar narrative, the
-sim encodes out-of-range scrap detail in a **private, documented S2F16 list extension**
-`<L [2] <B EAC> <L [2] <U4 scrappedWafers> <U4 damageUsd>>>` used only between this sim and
-adapter. The adapter reads `EAC` first; scrap fields are optional and default to 0. This is
-a simulator-private convention, **not** a claim of standard SECS-II semantics; documented.
+Every mapping uses the **standard** secsgem function structures — no private wire
+extensions. Standard S2F16 carries only `EAC` (one byte), so an out-of-range EC write is
+reported as `{ok:False, reason}` with **no** scrap numbers over the wire; the sim tracks
+scrapped wafers / damage internally for its own state, but the adapter does not claim them.
+This is honest: the wafer-dollar blast-radius narrative lives in the in-process stub demo
+and in the governance budget; the HSMS slice proves the protocol + governance, and
+governance blocks out-of-range writes (budget/approval) before they reach the wire anyway.
+secsgem validates each reply against its `_data_format`, which is why a private S2F16 list
+extension was rejected in design.
 
 ### `secs_demo.py` (new)
 
@@ -145,13 +156,13 @@ Demonstrates a governed call crossing the real wire.
 ### Tests (`test_secs_transport.py`, new)
 
 - **Mapping unit tests** (no network): tool→(stream,function) selection; SecsVar
-  encode/decode round-trip for EC write and SV read; S2F16 EAC/scrap parsing; unsupported
-  tool raises `HsmsError`.
+  encode/decode round-trip for EC write and SV read; S2F16 EAC parsing; S2F42 HCACK parsing;
+  unsupported tool raises `HsmsError`.
 - **Loopback integration tests** (sim in a thread + `HsmsEquipment` host on a free port):
   - governed read returns expected SV/EC data over the wire;
   - in-range EC write acks `EAC=0` and changes sim state;
-  - out-of-range EC write acks `EAC=1` and reports scrap;
-  - host command ABORT/ONLINE acks;
+  - out-of-range EC write acks `EAC=1` (reject; no scrap detail on the wire);
+  - host command ABORT/ONLINE acks `HCACK=0`;
   - connection failure (no sim) raises `HsmsError` fail-closed;
   - a full gateway governed read+approve+write over the wire is audited (reuse kernel).
 - Existing 27 tests (`test_hardening`, `test_custody_anchor`) stay green and unchanged.
