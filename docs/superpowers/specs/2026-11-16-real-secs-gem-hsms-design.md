@@ -123,8 +123,10 @@ contract as the stub.
   - `manage_process_job`, `manage_carrier`, `get_security_status`, `list_alarms` →
     **not wired** in HSMS mode: raise `HsmsError("tool not supported over HSMS: ...")`.
     Documented bounded scope.
-- Value extraction uses the secsgem SecsVar tree (`item.data["ECID"].value[0]` etc.),
-  encapsulated in small private helpers so the mapping is unit-testable.
+- Value extraction uses the secsgem SecsVar tree with the uniform scalar accessor
+  `var.get()` (ASCII → str, numeric → int/float; verified offline). Note `.value` is a
+  string for ASCII but a list for numerics, so `.get()` is used everywhere to avoid
+  first-character bugs. Encapsulated in small private helpers so the mapping is unit-testable.
 
 ### Data mapping note (all-standard SECS-II)
 
