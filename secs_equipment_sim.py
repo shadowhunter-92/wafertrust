@@ -66,6 +66,8 @@ class SecsEquipmentSim:
         self.handler.register_stream_function(1, 1, self._on_s1f1)
         self.handler.register_stream_function(1, 3, self._on_s1f3)
         self.handler.register_stream_function(2, 13, self._on_s2f13)
+        self.handler.register_stream_function(2, 15, self._on_s2f15)
+        self.handler.register_stream_function(2, 41, self._on_s2f41)
 
     def _on_s1f1(self, handler, message):
         return handler.stream_function(1, 2)(["WaferTrustSim", "1.0"])
@@ -79,6 +81,41 @@ class SecsEquipmentSim:
         fn = handler.settings.streams_functions.decode(message)
         ecids = [int(v.get()) for v in fn.data.data] or sorted(self.ec)
         return handler.stream_function(2, 14)([self.ec[e] for e in ecids])
+
+    def _on_s2f15(self, handler, message):
+        fn = handler.settings.streams_functions.decode(message)
+        eac = 0
+        for inner in fn.data.data:
+            ecid = int(inner.data["ECID"].get())
+            ecv = float(inner.data["ECV"].get())
+            model = EC_MODEL.get(ecid)
+            if model is None:
+                eac = 1
+                continue
+            _name, _cur, lo, hi = model
+            if lo <= ecv <= hi:
+                self.ec[ecid] = ecv
+            else:
+                eac = 1
+                self.scrapped_wafers += ACTIVE_LOT_WAFERS
+                self.damage_usd += ACTIVE_LOT_WAFERS * WAFER_VALUE_USD
+                self.alarms.append({"id": len(self.alarms) + 1,
+                                    "text": f"EC {ecid} out of range", "active": True})
+        return handler.stream_function(2, 16)(eac)
+
+    def _on_s2f41(self, handler, message):
+        fn = handler.settings.streams_functions.decode(message)
+        rcmd = str(fn.data.data["RCMD"].get()).upper()
+        if rcmd == "ABORT":
+            self.scrapped_wafers += ACTIVE_LOT_WAFERS
+            self.damage_usd += ACTIVE_LOT_WAFERS * WAFER_VALUE_USD
+            hcack = 0
+        elif rcmd in ("ONLINE", "OFFLINE"):
+            self.control_state = rcmd
+            hcack = 0
+        else:
+            hcack = 1
+        return handler.stream_function(2, 42)({"HCACK": hcack, "PARAMS": []})
 
     def start(self) -> None:
         _install_windows_shutdown_filter()

@@ -75,5 +75,47 @@ class SimReadPath(unittest.TestCase):
         self.assertEqual(vals, [EC_MODEL[2001][1]])
 
 
+class SimWritePath(unittest.TestCase):
+    def setUp(self):
+        self.port = free_port()
+        self.sim = SecsEquipmentSim(port=self.port)
+        self.sim.start()
+        self.assertTrue(self.sim.wait_ready(5.0))
+        self.host = make_host(self.port)
+        self.host.enable()
+        self.assertTrue(wait_selected(self.host))
+
+    def tearDown(self):
+        self.host.disable()
+        self.sim.stop()
+
+    def _decode(self, resp):
+        return self.host.settings.streams_functions.decode(resp)
+
+    def test_in_range_ec_write_acks_and_changes_state(self):
+        fn = self._decode(self.host.send_and_waitfor_response(
+            self.host.stream_function(2, 15)([{"ECID": 2001, "ECV": 400.0}])))
+        self.assertEqual(fn.data.get(), 0)            # EAC = 0 (accepted)
+        self.assertEqual(self.sim.ec[2001], 400.0)
+
+    def test_out_of_range_ec_write_rejects_and_keeps_state(self):
+        before = self.sim.ec[2001]
+        fn = self._decode(self.host.send_and_waitfor_response(
+            self.host.stream_function(2, 15)([{"ECID": 2001, "ECV": 500.0}])))
+        self.assertEqual(fn.data.get(), 1)            # EAC = 1 (rejected)
+        self.assertEqual(self.sim.ec[2001], before)   # unchanged
+        self.assertGreater(self.sim.scrapped_wafers, 0)
+
+    def test_host_command_abort_acks(self):
+        fn = self._decode(self.host.send_and_waitfor_response(
+            self.host.stream_function(2, 41)({"RCMD": "ABORT", "PARAMS": []})))
+        self.assertEqual(fn.data.data["HCACK"].get(), 0)
+
+    def test_unknown_command_rejected(self):
+        fn = self._decode(self.host.send_and_waitfor_response(
+            self.host.stream_function(2, 41)({"RCMD": "BOGUS", "PARAMS": []})))
+        self.assertEqual(fn.data.data["HCACK"].get(), 1)
+
+
 if __name__ == "__main__":
     unittest.main()
