@@ -5,13 +5,17 @@ adapter on a free TCP port). The endpoint is a SOFTWARE SIMULATOR, not real equi
 """
 from __future__ import annotations
 
+import asyncio
+import os
 import socket
+import tempfile
 import unittest
 
 from secs_equipment_sim import SecsEquipmentSim, SV_MODEL, EC_MODEL
 from secsgem.secs.functions import (SecsS01F02, SecsS01F04, SecsS02F16, SecsS02F42)
 from hsms_equipment import (decode_online_data, decode_sv_values, decode_eac,
                             decode_hcack, HsmsError, HsmsEquipment, DEMO_SVIDS, DEMO_ECIDS)
+from fab_gateway import FabGovernanceGateway
 
 
 def free_port() -> int:
@@ -186,6 +190,48 @@ class AdapterFailClosed(unittest.TestCase):
         port = free_port()  # nothing listening
         with self.assertRaises(HsmsError):
             HsmsEquipment(port=port, connect_timeout=1.0)
+
+
+class GatewayOverWire(unittest.TestCase):
+    def setUp(self):
+        self.port = free_port()
+        self.sim = SecsEquipmentSim(port=self.port)
+        self.sim.start()
+        self.assertTrue(self.sim.wait_ready(5.0))
+        self.eq = HsmsEquipment(port=self.port)
+        self.tmp = tempfile.TemporaryDirectory()
+        self.db = os.path.join(self.tmp.name, "gw.sqlite3")
+        self.gw = FabGovernanceGateway(self.eq, db_path=self.db)
+
+    def tearDown(self):
+        self.eq.close()
+        self.sim.stop()
+        store = self.gw.gw.identities.store
+        close = getattr(store, "close", None)
+        if close:
+            close()
+        self.tmp.cleanup()
+
+    def test_governed_read_is_audited(self):
+        out = asyncio.run(self.gw.governed_call("get_equipment_status", {}))
+        self.assertTrue(out["allowed"])
+        self.assertEqual(out["result"]["mdlrn"], "WaferTrustSim")
+        self.assertTrue(self.gw.verify_integrity())
+        self.assertGreaterEqual(len(self.gw.audit_entries()), 1)
+
+    def test_write_blocked_then_approved_executes_over_wire(self):
+        out = asyncio.run(self.gw.governed_call("set_equipment_constant",
+                                                {"ecid": 2001, "value": 400}))
+        self.assertFalse(out["allowed"])
+        self.assertTrue(out["needs_approval"])
+        self.assertTrue(self.gw.approve(out["approval_id"]))
+        out2 = asyncio.run(self.gw.governed_call("set_equipment_constant",
+                                                 {"ecid": 2001, "value": 400},
+                                                 operation_id=out["operation_id"]))
+        self.assertTrue(out2["allowed"])
+        self.assertTrue(out2["result"]["ok"])
+        self.assertEqual(self.sim.ec[2001], 400.0)   # changed over the real wire
+        self.assertTrue(self.gw.verify_integrity())
 
 
 if __name__ == "__main__":
