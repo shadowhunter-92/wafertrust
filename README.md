@@ -197,19 +197,20 @@ suite still exits non-zero. The individual non-HSMS modules also run under `pyth
 
 ## Artifacts (the proof)
 
-- `audit-flight-recorder.jsonl`, `maintenance-flight-recorder.jsonl` — complete audit exports:
+- `audit-flight-recorder.jsonl`, `maintenance-flight-recorder.jsonl`, `secs-flight-recorder.jsonl` — complete audit exports:
   every field of every entry (seq, timestamp, actor, action, protocols, capability, decision,
   reason, cost, prev_hash, entry_hash). Independently verifiable from the file alone.
-- `audit-checkpoint.json`, `maintenance-checkpoint.json` — Ed25519-signed checkpoints over the
+- `audit-checkpoint.json`, `maintenance-checkpoint.json`, `secs-checkpoint.json` — Ed25519-signed checkpoints over the
   chain head, produced with a separate operator key.
-- `audit-witness.json`, `maintenance-witness.json` — independent-witness envelopes co-signing the
+- `audit-witness.json`, `maintenance-witness.json`, `secs-witness.json` — independent-witness envelopes co-signing the
   checkpoint digest and sequence with a third, distinct key.
-- `audit-anchor.json`, `maintenance-anchor.json` — anchor metadata: the operator/witness public
+- `audit-anchor.json`, `maintenance-anchor.json`, `secs-anchor.json` — anchor metadata: the operator/witness public
   keys, the anchor reference, and whether an independent time anchor was applied.
 - `audit-tsa-token.der`, `maintenance-tsa-token.der` — *optional* RFC 3161 TSA tokens, present only
   when a `TsaClient` is configured (the demos default to witness-only, so these are absent).
-- `audit-call-journal.jsonl`, `maintenance-call-journal.jsonl` — exact tool arguments and
-  outcomes for every governed call, bound to audit entry hashes.
+- `audit-call-journal.jsonl`, `maintenance-call-journal.jsonl`, `secs-call-journal.jsonl` — exact tool arguments and
+  outcomes for every governed call, bound to audit entry hashes. The secs journal is from the real
+  HSMS/SECS-II wire run to the software simulator.
 - `secsgem-run-log.txt`, `maintenance-run-log.txt` — console run logs from the current code.
 
 Verify any export yourself (requires the AgentBridge clone, no simulator):
@@ -217,6 +218,7 @@ Verify any export yourself (requires the AgentBridge clone, no simulator):
 ```bash
 python verify_export.py audit
 python verify_export.py maintenance
+python verify_export.py secs
 ```
 
 The hash chain detects edits within the retained history; it is not WORM storage or

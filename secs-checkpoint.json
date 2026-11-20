@@ -1,0 +1,8 @@
+{
+  "seq": 7,
+  "head_hash": "5bd1de7b581cad471a1151b9f4013af352ddf7da5703dd0e8d13485a4276ca69",
+  "algo": "ed25519",
+  "public_key_hex": "22d62a351b20112cf33d26d7ded517b13c481aba6ec82da6e373d199afe3aa59",
+  "signature_hex": "df3a260fd4f2a2481ba6129ac00bfe97ea5eb8952468fc5c0405139ae8315d1c3441957dc2dfc37b54724e13d6d7823af9d90b4a52eed4fec04b7ce7830ac204",
+  "created_at": "2026-11-20T05:44:52.322994+00:00"
+}
