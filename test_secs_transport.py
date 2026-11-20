@@ -17,6 +17,17 @@ from hsms_equipment import (decode_online_data, decode_sv_values, decode_eac,
                             decode_hcack, HsmsError, HsmsEquipment, DEMO_SVIDS, DEMO_ECIDS)
 from fab_gateway import FabGovernanceGateway
 
+# secsgem reconnects on disconnect: when one peer closes the socket, the other's
+# _disconnected handler spawns a fresh non-daemon thread while it is still enabled.
+# disable() only joins the thread it captured, so that reconnect thread can leak
+# (hang at interpreter shutdown) or never clear its stop flag (deadlock in disable()'s
+# busy wait). These tests connect once and never reconnect, so suppress the reconnect
+# handlers for the test process. disable() then joins only its own thread cleanly.
+from secsgem.common.tcp_client_connection import TcpClientConnection
+from secsgem.common.tcp_server_connection import TcpServerConnection
+TcpClientConnection._disconnected = lambda self, _: None
+TcpServerConnection._disconnected = lambda self, _: None
+
 
 def free_port() -> int:
     s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -58,8 +69,8 @@ class SimReadPath(unittest.TestCase):
         self.assertTrue(wait_selected(self.host), "HSMS link not selected")
 
     def tearDown(self):
-        self.host.disable()
         self.sim.stop()
+        self.host.disable()
 
     def _decode(self, resp):
         return self.host.settings.streams_functions.decode(resp)
@@ -93,8 +104,8 @@ class SimWritePath(unittest.TestCase):
         self.assertTrue(wait_selected(self.host))
 
     def tearDown(self):
-        self.host.disable()
         self.sim.stop()
+        self.host.disable()
 
     def _decode(self, resp):
         return self.host.settings.streams_functions.decode(resp)
@@ -149,8 +160,8 @@ class AdapterLoopback(unittest.TestCase):
         self.eq = HsmsEquipment(port=self.port)
 
     def tearDown(self):
-        self.eq.close()
         self.sim.stop()
+        self.eq.close()
 
     def test_get_equipment_status(self):
         res = self.eq.dispatch("get_equipment_status", {})
@@ -204,8 +215,8 @@ class GatewayOverWire(unittest.TestCase):
         self.gw = FabGovernanceGateway(self.eq, db_path=self.db)
 
     def tearDown(self):
-        self.eq.close()
         self.sim.stop()
+        self.eq.close()
         store = self.gw.gw.identities.store
         close = getattr(store, "close", None)
         if close:
