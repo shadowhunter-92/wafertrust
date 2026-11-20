@@ -31,9 +31,12 @@ jobs:
       - name: Install dependencies
         run: pip install -r wafertrust/requirements.txt
 
-      - name: Run hardening + custody/anchor tests
+      # Full suite via run_tests.py: secsgem leaves non-daemon cleanup threads that
+      # can block interpreter shutdown after all tests pass (Windows race). The runner
+      # collects the real unittest result and exits with the correct status deterministically.
+      - name: Run hardening + custody/anchor + secs transport tests
         working-directory: wafertrust
-        run: python -m unittest test_hardening test_custody_anchor -v
+        run: python run_tests.py
 
       - name: Run SECS/GEM demo
         working-directory: wafertrust
@@ -43,8 +46,13 @@ jobs:
         working-directory: wafertrust
         run: python maintenance_demo.py
 
+      - name: Run real HSMS/SECS-II demo
+        working-directory: wafertrust
+        run: python secs_demo.py
+
       - name: Re-verify exported flight recorders
         working-directory: wafertrust
         run: |
           python verify_export.py audit
           python verify_export.py maintenance
+          python verify_export.py secs

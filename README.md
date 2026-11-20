@@ -44,8 +44,9 @@ boundary: read calls are logged, and writes require approval and sufficient conf
   offline witness on the same host — not an HSM, not independent custody, and FreeTSA is not a
   qualified timestamp authority (details below).
 - **Fab-first, MCP-wire integration.** Reads, equipment constants, process jobs, and carriers
-  are routed through the MCP `tools/call` representation. This is a library demo, not a
-  standalone MCP server or a live SECS/GEM connection.
+  are routed through the MCP `tools/call` representation. The default demos are a library demo,
+  not a standalone MCP server. An optional wire path (`secs_demo.py`) speaks real HSMS/SECS-II
+  to a software equipment simulator; see the wire-path section below.
 - **Real kernel, not a mock.** Governance uses AgentBridge's actual `GovernanceGateway`
   (`require_verified=True`) for policy, budgets, approvals, and audit. Approval grants are
   one-shot and bound to the exact request: an approved retry must reuse the blocked call's
@@ -146,15 +147,53 @@ python verify_export.py audit --operator-key "$OPERATOR_PUB_HEX" --witness-key "
 |------|----------|
 | `demo.py` | SECS/GEM equipment: 7 scenes (ungoverned scrap → governed reads → approval-gated write → budget circuit breaker → impersonation denied → complete signed export). |
 | `maintenance_demo.py` | Maintenance/facilities wedge: read-only flight recorder + approval-gated `dispatch_work_order` + impersonation denied (6 scenes). |
+| `secs_demo.py` | Real HSMS/SECS-II wire path: the same governed scenes over a TCP connection to a software equipment simulator, then a signed export. See the wire-path section below. |
+| `secs_equipment_sim.py` | Software HSMS/SECS-II equipment simulator (SEMI E37 passive). Speaks real SECS-II over TCP; runs standalone or in-process for tests. Not real equipment. |
+| `hsms_equipment.py` | HSMS host adapter (SEMI E37 active) implementing the same `.dispatch(tool, arguments)` contract over a bounded SECS-II tool subset. |
 | `verify_export.py` | Standalone verifier: re-checks an exported chain, checkpoint signature, journal linkage, and witness anchor (with optional pinned trust roots + TSA token) without the simulator. |
+| `run_tests.py` | Deterministic full-suite runner (48 tests). Exits with the real unittest status even if a secsgem cleanup thread lingers at shutdown. |
 | `test_hardening.py` | 14 tests: fail-closed authentication, request-bound approvals, budget breaker, idempotency, export/checkpoint tamper detection. |
 | `test_custody_anchor.py` | 13 tests: encrypted keystore round-trip + wrong-passphrase rejection, witness anchor + tamper detection, mocked TSA, durable identity across restart, pinned-root verification. |
+| `test_secs_transport.py` | 21 tests: SECS-II decode helpers, simulator read/write paths, host adapter loopback, fail-closed connect, and governed reads/writes audited over the real wire. |
 | `keystore.py` | Optional encrypted-at-rest key custody (AES-256-GCM under a scrypt passphrase); persists agent/operator/witness keys across restarts. |
 | `anchor.py` | Independent-witness anchor wrapper over the kernel's `external_anchor`; creates and verifies a witness envelope over the checkpoint. |
 | `tsa.py` | Optional RFC 3161 TSA adapter (`rfc3161ng`); timestamps the checkpoint digest. Mocked in tests/CI; pinned FreeTSA cert for live use. |
 | `equipment.py` | In-process SECS/GEM equipment simulator. Mirrors the go-factory-io / secsgem-mcp-server data model (SV, EC, alarms, process jobs, carriers, E191-style report) so the demo runs laptop-only. |
 | `maintenance_system.py` | Maintenance-system stub (assets, sensors, work orders). |
 | `fab_gateway.py` | Governance gateway wrapping AgentBridge's trust kernel; governs 6 read + 4 write tools at the MCP boundary with request-bound signed proofs. |
+
+## Real SECS/GEM wire path (optional)
+
+`secs_demo.py` drives the same governance gateway over a real HSMS (SEMI E37) and SECS-II
+(SEMI E5) TCP connection to `secs_equipment_sim.py`, a software equipment simulator running
+as a separate process. The protocol boundary is real. The governed device is not: it is a
+software simulator, not real fab equipment, and this makes no production-safety or compliance
+claim.
+
+- Bounded tool subset mapped to standard SECS-II: `get_equipment_status` (S1F1/F2),
+  `get_status_variable` and `list_status_variables` (S1F3/F4), `list_equipment_constants`
+  (S2F13/F14), `set_equipment_constant` (S2F15/F16), `execute_command` (S2F41/F42).
+  Process-job, carrier, alarm, and security tools are not wired over HSMS and raise `HsmsError`.
+- Standard S1F4/S2F14 carry positional values only (no IDs, names, or units), so the adapter
+  requests explicit IDs and zips them. List shapes therefore differ from the in-process stub.
+  S2F16 carries only a single-byte EAC, so an out-of-range write is rejected (EAC=1) with no
+  scrap detail on the wire. S2F42 returns a top-level HCACK.
+- Governance is unchanged: identity, policy, budgets, approvals, and the hash-chained audit sit
+  above the wire boundary exactly as in the in-process demo. The export re-verifies the same way.
+- Dependency: `secsgem==0.3.0` (LGPL-2.1-or-later), imported as a separable pip dependency, not
+  vendored. WaferTrust's own code stays Apache-2.0. Only the HSMS demo and tests import it.
+
+Run it, then re-verify the export:
+
+```bash
+python secs_demo.py
+python verify_export.py secs
+```
+
+The full suite (48 tests) runs through `python run_tests.py`. That runner collects the real
+unittest result and exits with the correct status deterministically, because secsgem can leave
+a non-daemon cleanup thread alive at interpreter shutdown after every test has passed. A failing
+suite still exits non-zero. The individual non-HSMS modules also run under `python -m unittest`.
 
 ## Artifacts (the proof)
 
@@ -201,9 +240,11 @@ pip install -r requirements.txt
 
 PYTHONUTF8=1 python demo.py
 PYTHONUTF8=1 python maintenance_demo.py
-PYTHONUTF8=1 python -m unittest test_hardening test_custody_anchor -v
+PYTHONUTF8=1 python secs_demo.py
+PYTHONUTF8=1 python run_tests.py
 python verify_export.py audit
 python verify_export.py maintenance
+python verify_export.py secs
 ```
 
 `fab_gateway.py` resolves the kernel at `../agentbridge`, so the two folders must stay

@@ -3,16 +3,20 @@
 **Status: engineering alpha.** This describes the security properties of the *demo* as it
 exists today, on laptop-only simulators. It is not a production security assessment, a
 compliance claim, or a safety case. Read it together with the [README](README.md), the
-14 tests in [`test_hardening.py`](test_hardening.py), and the custody/anchoring tests in
-[`test_custody_anchor.py`](test_custody_anchor.py).
+14 tests in [`test_hardening.py`](test_hardening.py), the custody/anchoring tests in
+[`test_custody_anchor.py`](test_custody_anchor.py), and the wire-path tests in
+[`test_secs_transport.py`](test_secs_transport.py).
 
 ## 1. What this is
 
 A single-process Python demo that puts AgentBridge's real `GovernanceGateway` between a demo
 agent and a simulated SECS/GEM equipment boundary (`equipment.py`, `maintenance_system.py`).
-There is no network transport, no real equipment, and no multi-tenant deployment. The kernel
-runs in production admission mode (`AGENTBRIDGE_ENV=production`, `require_verified=True`), so
-the authentication and authorization paths are the kernel's real ones, not stubs.
+The default demos have no network transport and no real equipment. An optional wire path
+(`secs_demo.py`) adds a real HSMS/SECS-II TCP link to a software equipment simulator on
+localhost; the protocol is real, the device is not (see the wire-path limits below). There is
+no multi-tenant deployment. The kernel runs in production admission mode
+(`AGENTBRIDGE_ENV=production`, `require_verified=True`), so the authentication and authorization
+paths are the kernel's real ones, not stubs.
 
 ## 2. Assets
 
@@ -87,12 +91,24 @@ These are **not** provided, and no claim is made otherwise:
   passphrase key) now persists agent/operator/witness keys at rest, but it is encryption on the
   same host — not an HSM or remote key manager — with no rotation or revocation. The demos still
   default to ephemeral, generate-per-run keys. Host compromise remains out of scope.
-- **Transport / network security.** Calls are in-process. There is no TLS, no MCP server
-  socket, no SECS/GEM HSMS link to harden.
+- **Transport / network security.** The default demos are in-process. The optional HSMS wire
+  path is plaintext TCP to a localhost software simulator: no TLS, no HSMS link hardening, no
+  MCP server socket. It demonstrates the protocol boundary, not a secured production transport.
 - **Host / operator compromise.** A compromised host or operator key is outside the model.
 - **Production identity / multi-tenancy.** No SSO, no tenant isolation, no scale guarantees.
 - **Real lot valuation.** Costs are fixed illustrative wafer-dollars, not live lot values; the
   example shift budget has no automatic shift reset.
+
+### Real SECS/GEM wire path limits
+
+- The HSMS endpoint (`secs_equipment_sim.py`) is a software simulator, not real equipment. The
+  wire protocol (HSMS/SECS-II) is real; the governed device is not.
+- `secsgem==0.3.0` is LGPL-2.1-or-later, used as a separable pip dependency (imported, not
+  vendored). WaferTrust's own code remains Apache-2.0.
+- Bounded tool subset; standard SECS-II structures only. No GEM300, no SECS-I, no full tool
+  mapping, no certification, and no production-safety or process-physics claim.
+- Governance is unchanged: identity, policy, budgets, approvals, and the hash-chained audit sit
+  above the wire boundary exactly as in the in-process demo.
 
 ## 6. Residual risks
 
@@ -104,7 +120,8 @@ These are **not** provided, and no claim is made otherwise:
 
 ## 7. What a real deployment would need
 
-An actual equipment connector (e.g. a SECS/GEM driver), HSM-grade operator key custody with
+A connector to real equipment (the demo now speaks real SECS-II/HSMS to a software simulator,
+not to a fab tool), HSM-grade operator key custody with
 rotation and revocation, an independent witness service in a separate trust domain (or a
 qualified TSA) rather than the same-host witness and free FreeTSA used here, deployment-specific
 risk policies, transport hardening, and a physical safety layer independent of this
